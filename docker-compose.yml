@@ -1,0 +1,14 @@
+services:
+  spark-notebook:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: spark-notebook
+    ports:
+      - "8888:8888"   # Jupyter
+      - "4040:4040"   # Spark UI (aparece quando um job roda)
+    volumes:
+      - ./:/home/jovyan/work
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+    command: start-notebook.sh --NotebookApp.token=''
