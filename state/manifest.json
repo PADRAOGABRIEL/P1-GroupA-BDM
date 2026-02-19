@@ -2,11 +2,13 @@
   "processed_files": [
     {
       "filename": "yellow_tripdata_2025-01.parquet",
-      "processed_at": "2026-02-15T18:50:32.485484"
+      "size_bytes": 59158238,
+      "processed_at": "2026-02-19T21:27:30.692767+00:00"
     },
     {
       "filename": "yellow_tripdata_2025-02.parquet",
-      "processed_at": "2026-02-15T18:50:32.485484"
+      "size_bytes": 60343086,
+      "processed_at": "2026-02-19T21:27:30.692767+00:00"
     }
   ]
 }
