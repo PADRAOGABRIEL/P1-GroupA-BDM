@@ -3,12 +3,12 @@
     {
       "filename": "yellow_tripdata_2025-01.parquet",
       "size_bytes": 59158238,
-      "processed_at": "2026-02-19T21:27:30.692767+00:00"
+      "processed_at": "2026-02-26T12:33:08.726729+00:00"
     },
     {
       "filename": "yellow_tripdata_2025-02.parquet",
       "size_bytes": 60343086,
-      "processed_at": "2026-02-19T21:27:30.692767+00:00"
+      "processed_at": "2026-02-26T12:33:08.726729+00:00"
     }
   ]
 }

@@ -1,177 +1,339 @@
-# Project 1 – Incremental Spark ETL with Correctness and Performance Evidence
+# 🚕 Incremental ETL Pipeline – NYC Taxi Trips
 
 ## Overview
-This project implements an incremental ETL pipeline using Apache Spark to process NYC Taxi trip records stored as Parquet files.
-The job processes only new incoming files, applies data cleaning and deduplication rules, enriches trips with zone information, and writes a cumulative enriched output dataset.
-The pipeline is idempotent, meaning it can be safely re-run without duplicating data.
+
+This project implements an incremental and idempotent ETL pipeline in PySpark to process NYC Taxi trip data stored in monthly Parquet files.
+
+The pipeline includes:
+
+- Incremental ingestion controlled by a manifest file  
+- Schema normalization and type casting  
+- Data validation and cleaning  
+- Batch-level and cross-run deduplication  
+- Enrichment using taxi zone lookup  
+- Derived feature computation  
+- Optimized Parquet output writing  
+
+The system guarantees correctness across multiple executions and processes only new files added to the `inbox` directory.
 
 ---
 
-## Dataset
-- NYC Taxi and Limousine Commission (TLC) trip records, provided as monthly Parquet files
-- taxi_zone_lookup.parquet: static lookup table mapping LocationID to zone names
+# 1️⃣ Correctness
 
-Input files location:
-data/inbox/
+## Row Counts (New Batch)
 
-Lookup table location:
-data/taxi_zone_lookup.parquet
+| Stage | Rows |
+|-------|------|
+| Input | 7,052,769 |
+| After cleaning | 5,579,927 |
+| After deduplication | 5,486,133 |
+| Final output written | 5,486,133 |
 
----
+### Observations
 
-## Architecture and Incremental Ingestion
-
-### Inbox / Outbox Pattern
-- Inbox (data/inbox/)
-  Contains raw input Parquet files (monthly trip data). These files are never modified.
-
-- Outbox (data/outbox/trips_enriched.parquet)
-  Contains the cumulative, cleaned, deduplicated, and enriched dataset.
-
-### Manifest (State Management)
-A state file is maintained at:
-state/manifest.json
-
-The manifest records which input files have already been processed.
-At minimum, it stores the filename and processing timestamp.
-
-Example manifest entry:
-filename: yellow_tripdata_2025-01.parquet  
-processed_at: 2026-02-15T19:10:00Z
-
-### Incremental Logic
-1. List all Parquet files in data/inbox/
-2. Compare them with filenames stored in the manifest
-3. Process only new files
-4. Append processed data to the outbox
-5. Update the manifest
-
-Re-running the job when no new files are present results in:
-Nothing new to process.
+- ~1.47M rows were removed due to invalid or inconsistent data.
+- ~93K duplicate rows were removed.
+- The final output matches the post-deduplication count, confirming correctness and idempotency.
 
 ---
 
-## Data Cleaning
-The following data cleaning rules were applied:
+## Cleaning Rules Applied
 
-1. Remove trips with passenger_count <= 0
-2. Remove trips with trip_distance <= 0
-3. Remove trips where dropoff_datetime <= pickup_datetime
+Rows were removed when:
 
-These rules remove logically invalid taxi trips caused by sensor or data entry errors.
+- Required fields were null  
+- `passenger_count <= 0`  
+- `trip_distance <= 0`  
+- `tpep_dropoff_datetime <= tpep_pickup_datetime`  
 
-### Examples of Invalid Rows
-- Trips with zero passengers
-- Trips with non-positive distance
-- Trips with invalid pickup or dropoff timestamps
+These constraints ensure logical trip consistency and eliminate corrupted operational records.
 
 ---
 
-## Deduplication
-To avoid duplicate trips, records are deduplicated using the composite key:
+## Examples of Invalid Trips (Bad Rows)
 
-VendorID  
-pickup_datetime  
-dropoff_datetime  
-PULocationID  
-DOLocationID  
+### Example 1 — Zero Distance & Zero Duration
 
-Deduplication is applied to newly ingested data before writing to the output, ensuring correctness and idempotency.
+| passenger_count | trip_distance | tpep_pickup_datetime   | tpep_dropoff_datetime  |
+|---:|---:|---|---|
+| 1 | 0.0 | 2025-01-01 00:49:48 | 2025-01-01 00:49:48 |
 
----
-
-## Data Enrichment
-Trip records are enriched using taxi_zone_lookup.parquet:
-
-- pickup_zone is added using PULocationID
-- dropoff_zone is added using DOLocationID
-
-Two left joins are applied to preserve all trips even if a zone mapping is missing.
-
-To improve performance, the lookup table is joined using broadcast joins.
+**Problem:** `trip_distance = 0` and `dropoff_datetime = pickup_datetime` → duration = 0  
+**Rule applied:** removed because `trip_distance <= 0` and `tpep_dropoff_datetime <= tpep_pickup_datetime`.
 
 ---
 
-## Derived and Metadata Fields
-The following additional fields are created:
+### Example 2 — Negative Duration (Dropoff Before Pickup)
 
-- trip_duration_minutes – derived from pickup and dropoff timestamps
-- pickup_date – date extracted from pickup timestamp
-- source_file – original input file that produced the record
-- ingested_at – timestamp when the record was processed
+| passenger_count | trip_distance | tpep_pickup_datetime   | tpep_dropoff_datetime  |
+|---:|---:|---|---|
+| 1 | 9.0 | 2025-01-02 12:26:00 | 2025-01-02 11:29:58 |
 
----
-
-## Output
-- Output is written to:
-data/outbox/trips_enriched.parquet
-
-- The dataset grows incrementally as new files arrive
-- Previously processed data is preserved
-- No duplicates are created when re-running the job
+**Problem:** dropoff happens **before** pickup.  
+**Rule applied:** removed because `tpep_dropoff_datetime <= tpep_pickup_datetime`.
 
 ---
 
-## Correctness Evidence
+### Example 3 — Invalid Passenger Count
 
-Stage | Row Count
------ | ---------
-Input (new files) | XXXX
-After cleaning | XXXX
-After deduplication | XXXX
-Final output (cumulative) | XXXX
+| passenger_count | trip_distance | tpep_pickup_datetime   | tpep_dropoff_datetime  |
+|---:|---:|---|---|
+| 0 | 0.4 | 2025-01-01 00:14:47 | 2025-01-01 00:16:15 |
 
-The counts demonstrate that invalid and duplicate records are removed and that the output accumulates correctly across runs.
+**Problem:** `passenger_count = 0`.  
+**Rule applied:** removed because `passenger_count <= 0`.
 
 ---
 
-## Performance Evidence
-Performance was evaluated using the Spark Web UI.
+## Deduplication Strategy
 
-Metrics collected include:
-- Total job execution time
-- Stage execution time
-- Shuffle read/write during join operations
+**Deduplication key:**
 
-### Optimizations Applied
-1. Broadcast joins for the zone lookup table
-2. Reduced number of shuffle partitions
-3. Append-only writes to avoid expensive global rewrites
+```python
+['VendorID',
+ 'tpep_pickup_datetime',
+ 'tpep_dropoff_datetime',
+ 'PULocationID',
+ 'DOLocationID']
+```
 
-Spark UI screenshots showing job runtime and shuffle metrics are included.
+Two layers of deduplication were implemented:
 
----
+1. `dropDuplicates()` within the current batch  
+2. `left_anti` join against previously written OUTBOX records  
 
-## Idempotency
-The job is idempotent due to:
-- File-level tracking in the manifest
-- Processing only new input files
-- Deduplication logic based on a composite key
-
-Re-running the job without new input files does not modify the output.
+This guarantees idempotency even if the pipeline is re-run or files are reintroduced.
 
 ---
 
-## Custom Scenario
-The custom scenario provided by the teaching staff was implemented as required.
-Details and implementation can be found in the corresponding notebook cells and repository commits.
+# 2️⃣ Performance
+
+## Full Job Runtime
+
+**Full job runtime:** 37.03 seconds  
+
+Measured from the first Spark action to final Parquet write completion.
 
 ---
 
-## How to Run the Job
-1. Place new Parquet files in data/inbox/
-2. Start the Spark environment (Docker + Jupyter)
-3. Run the incremental ETL job cell in the notebook
-4. Verify that:
-   - New data is appended to the outbox
-   - The manifest is updated
-   - Re-running without new files produces no changes
+## Spark UI Evidence
+
+### Spark UI — Job Overview
+
+![Job](images/job_screen.png)
+
+### Spark UI — Stage Details (Shuffle, Spill & Task Distribution)
+
+![Stage](images/stage_screen.png)
+
+### Key Observations from Aggregation Stage
+
+- Total input processed: **72.0 MiB**
+- Shuffle Write: **113.0 MiB**
+- Spill (Memory): **518.0 MiB**
+- Spill (Disk): **102.1 MiB**
+- 16 shuffle tasks executed
+- Median task duration: **77 ms**
+- Max task duration: **3 s**
+- Median input per task: **~11 KiB**
+- Max input per task: **~12.2 MiB**
+- Max shuffle write per task: **~20.8 MiB**
+
+### Interpretation
+
+The aggregation stage triggered a heavy shuffle operation.  
+The large shuffle volume (113 MiB) combined with significant memory and disk spill indicates that the operation exceeded executor memory capacity during shuffle.
+
+The noticeable gap between median (77 ms) and maximum task duration (3 s) suggests uneven workload distribution across partitions.
+
+This demonstrates real shuffle cost and memory pressure during aggregation.
 
 ---
 
-## Technologies Used
-- Apache Spark (PySpark)
-- Parquet
-- Docker
-- Jupyter Notebook
-- Python
+## Optimization 1 — Broadcast Join
+
+The taxi zone lookup table was broadcasted:
+
+```python
+.join(broadcast(zones_pickup), ...)
+```
+
+### Impact
+
+- Prevented shuffling of the small dimension table  
+- Reduced network I/O  
+- Lowered join overhead  
+
+This is an appropriate optimization for small lookup datasets.
+
+---
+
+## Optimization 2 — Output Partition Control
+
+```python
+df_out.coalesce(4)
+```
+
+### Impact
+
+- Reduced small-file problem  
+- Controlled number of output Parquet files  
+- Improved downstream read efficiency  
+
+### We used `coalesce(4)` to control the number of output files and avoid the *small file problem*.
+
+- In Spark, **each partition typically becomes one output Parquet file**.
+- If we kept the default (e.g., **16 partitions/tasks** in our run), the write would produce ~16 small files.
+- Our job processed on the order of **~100 MiB** in the relevant stage (Spark UI showed shuffle/write in that magnitude), so:
+
+  - With **16 partitions** → ~100 MiB / 16 ≈ **6–7 MiB per file** (too small; high metadata overhead, inefficient reads)
+  - With **4 partitions** → ~100 MiB / 4 ≈ **25 MiB per file** (more reasonable; fewer files; better downstream read efficiency)
+
+---
+
+# 3️⃣ Custom Scenario — Skew Analysis
+
+## Objective
+
+This scenario evaluates whether the most frequent `pickup_zone` introduces data skew
+during aggregation and whether skew mitigation techniques improve performance.
+
+---
+
+## 1️⃣ Identifying the Most Frequent Pickup Zone
+
+We computed the distribution of `pickup_zone` and identified:
+
+- **Upper East Side South**
+- **286,719 records**
+- **~5.23% of total dataset**
+
+Although this is the most frequent key, its dominance is relatively low.
+Severe skew typically occurs when a key represents a significantly larger share
+(e.g., 20–40% of the dataset).
+
+---
+
+## 2️⃣ Baseline Aggregation
+
+Aggregation executed:
+
+```python
+baseline_agg.orderBy(desc("count")).show(10, truncate=False)
+```
+
+### Spark UI — Baseline Job
+
+![Baseline Job](images/scenario_baseline_job.png)
+
+### Spark UI — Baseline Stage
+
+![Baseline Stage](images/scenario_baseline_stage.png)
+
+### Baseline Metrics (Job 40 / Stage 53)
+
+- Runtime: **0.6 s**
+- Input: **5.7 MiB**
+- Shuffle Write: **60.0 KiB**
+- 16 tasks executed
+- Median task duration: **0.2 s**
+- Max task duration: **0.5 s**
+- No spill (memory or disk)
+
+### Interpretation
+
+Spark UI shows:
+
+- Small shuffle volume
+- Narrow gap between median and max task duration
+- No straggler tasks
+- No spill
+
+This indicates balanced task execution and low skew impact.
+
+---
+
+## 3️⃣ Repartition-Based Skew Mitigation Attempt
+
+We tested explicit repartitioning by key before aggregation:
+
+```python
+repart_agg = (
+    df_scn
+    .repartition("pickup_zone")      
+    .groupBy("pickup_zone")
+    .count()
+)
+
+repart_agg.orderBy(desc("count")).show(10, truncate=False)
+```
+
+This forces an additional shuffle to redistribute rows by `pickup_zone`
+before performing the aggregation.
+
+### Spark UI — Repartition Job
+
+![Repartition Job](images/scenario_ot_job.png)
+
+### Spark UI — Repartition Stage
+
+![Repartition Stage](images/scenario_ot_stage.png)
+
+### Observed Metrics (Job 42 / Stage 56)
+
+- Runtime: **0.7 s**
+- Input: **6.1 MiB**
+- Shuffle Write: **59.8 KiB**
+- 16 tasks executed
+- Median task duration: **0.1 s**
+- Max task duration: **0.6 s**
+- No spill
+
+### Interpretation
+
+Repartitioning introduced an additional shuffle phase without improving task balance.
+
+- Runtime slightly increased (0.6 s → 0.7 s)
+- Shuffle volume remained similar
+- Task duration distribution remained balanced
+- No spill occurred in either case
+
+This confirms that repartitioning does not improve performance in this scenario.
+
+---
+
+# Incremental & Idempotent Design
+
+- `manifest.json` tracks processed files  
+- Only new files in `inbox/` are processed  
+- Re-running without new files produces no changes  
+- Anti-join prevents duplicate writes across executions  
+
+---
+
+# Output Schema
+
+The final dataset includes:
+
+- Pickup and dropoff timestamps  
+- Pickup and dropoff LocationID  
+- Pickup and dropoff zone names  
+- passenger_count  
+- trip_distance  
+- trip_duration_minutes  
+- pickup_date  
+- source_file  
+- ingested_at  
+
+---
+
+# Final Remarks
+
+This project demonstrates:
+
+- Scalable ETL design with incremental ingestion  
+- Strong correctness guarantees  
+- Practical use of Spark UI for performance analysis  
+- Real shuffle and spill investigation  
+- Empirical skew analysis with measured conclusions  
+- Application of distributed data engineering best practices  
