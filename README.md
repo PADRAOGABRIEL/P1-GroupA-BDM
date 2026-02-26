@@ -110,9 +110,9 @@ This guarantees idempotency even if the pipeline is re-run or files are reintrod
 
 ## Full Job Runtime
 
-**Full job runtime:** 37.03 seconds  
+**Full job runtime:** 4 seconds  
 
-Measured from the first Spark action to final Parquet write completion.
+Measured from the Spark UI Job overview (Job 14).
 
 ---
 
@@ -126,27 +126,38 @@ Measured from the first Spark action to final Parquet write completion.
 
 ![Stage](images/stage_screen.png)
 
-### Key Observations from Aggregation Stage
+---
 
-- Total input processed: **72.0 MiB**
-- Shuffle Write: **113.0 MiB**
-- Spill (Memory): **518.0 MiB**
-- Spill (Disk): **102.1 MiB**
+## Key Observations from Aggregation Stage (Stage 22)
+
+- Total input processed: **81.8 MiB**
+- Shuffle Write: **167.3 MiB**
+- Spill (Memory): **550.0 MiB**
+- Spill (Disk): **91.3 MiB**
 - 16 shuffle tasks executed
-- Median task duration: **77 ms**
-- Max task duration: **3 s**
-- Median input per task: **~11 KiB**
+- Median task duration: **0.2 s**
+- Max task duration: **4 s**
+- Median input per task: **~4.5 MiB**
 - Max input per task: **~12.2 MiB**
-- Max shuffle write per task: **~20.8 MiB**
+- Max shuffle write per task: **~30.7 MiB**
 
-### Interpretation
+---
 
-The aggregation stage triggered a heavy shuffle operation.  
-The large shuffle volume (113 MiB) combined with significant memory and disk spill indicates that the operation exceeded executor memory capacity during shuffle.
+## Interpretation
 
-The noticeable gap between median (77 ms) and maximum task duration (3 s) suggests uneven workload distribution across partitions.
+The aggregation stage triggered a heavy shuffle operation.
 
-This demonstrates real shuffle cost and memory pressure during aggregation.
+Key performance characteristics:
+
+- Shuffle output (167.3 MiB) exceeded input size (81.8 MiB), indicating a wide transformation.
+- Significant **memory spill (550 MiB)** and **disk spill (91.3 MiB)** show that shuffle exceeded executor memory capacity.
+- The noticeable gap between median task duration (0.2 s) and maximum task duration (4 s) indicates uneven workload distribution across partitions.
+
+This demonstrates:
+
+- Real shuffle cost
+- Memory pressure during aggregation
+- Partition imbalance leading to slower straggler tasks
 
 ---
 
@@ -160,11 +171,12 @@ The taxi zone lookup table was broadcasted:
 
 ### Impact
 
-- Prevented shuffling of the small dimension table  
-- Reduced network I/O  
-- Lowered join overhead  
+- Prevented shuffle of the small dimension table
+- Reduced network I/O
+- Lowered join overhead
+- Ensured the heavy shuffle occurs only on the large dataset side
 
-This is an appropriate optimization for small lookup datasets.
+Broadcasting is appropriate because the lookup table is small relative to the trip dataset.
 
 ---
 
@@ -176,18 +188,24 @@ df_out.coalesce(4)
 
 ### Impact
 
-- Reduced small-file problem  
-- Controlled number of output Parquet files  
-- Improved downstream read efficiency  
+- Reduced small-file problem
+- Controlled number of output Parquet files
+- Improved downstream read efficiency
+- Lowered metadata overhead
 
-### We used `coalesce(4)` to control the number of output files and avoid the *small file problem*.
+---
 
-- In Spark, **each partition typically becomes one output Parquet file**.
-- If we kept the default (e.g., **16 partitions/tasks** in our run), the write would produce ~16 small files.
-- Our job processed on the order of **~100 MiB** in the relevant stage (Spark UI showed shuffle/write in that magnitude), so:
+## Performance Conclusion
 
-  - With **16 partitions** → ~100 MiB / 16 ≈ **6–7 MiB per file** (too small; high metadata overhead, inefficient reads)
-  - With **4 partitions** → ~100 MiB / 4 ≈ **25 MiB per file** (more reasonable; fewer files; better downstream read efficiency)
+The job exhibits:
+
+- Significant shuffle cost
+- Measurable spill to memory and disk
+- Uneven task duration distribution
+
+These metrics confirm that aggregation is the dominant performance bottleneck in the pipeline.
+
+Spark UI evidence clearly demonstrates real-world distributed processing behavior, including shuffle amplification and memory pressure.
 
 ---
 
