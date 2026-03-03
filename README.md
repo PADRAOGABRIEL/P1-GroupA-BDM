@@ -1,5 +1,7 @@
 # 🚕 Incremental ETL Pipeline – NYC Taxi Trips
 
+## ➡️ **Environment setup:** [SETUP.md](SETUP.md).
+
 ## Overview
 
 This project implements an incremental and idempotent ETL pipeline in PySpark to process NYC Taxi trip data stored in monthly Parquet files.
@@ -227,8 +229,7 @@ We computed the distribution of `pickup_zone` and identified:
 - **~5.23% of total dataset**
 
 Although this is the most frequent key, its dominance is relatively low.
-Severe skew typically occurs when a key represents a significantly larger share
-(e.g., 20–40% of the dataset).
+Severe skew typically occurs when one key dominates a partition such that it significantly increases shuffle partition size relative to others, often representing a disproportionately large percentage of total records.
 
 ---
 
@@ -248,16 +249,16 @@ baseline_agg.orderBy(desc("count")).show(10, truncate=False)
 
 ![Baseline Stage](images/scenario_baseline_stage.png)
 
-### Baseline Metrics (Job 40 / Stage 53)
+### Baseline Metrics (Job 32 / Stage 44)
 
-- Runtime: **0.6 s**
-- Input: **5.7 MiB**
-- Shuffle Write: **60.0 KiB**
+- Total time across tasks: **2 s**
 - 16 tasks executed
-- Median task duration: **0.2 s**
-- Max task duration: **0.5 s**
+- Median task duration: **91 ms**
+- Max task duration: **0.4 s**
+- Max input per task: **1.7 MiB**
+- Shuffle Write per task (max): **~15 KiB**
 - No spill (memory or disk)
-
+  
 ### Interpretation
 
 Spark UI shows:
@@ -271,7 +272,43 @@ This indicates balanced task execution and low skew impact.
 
 ---
 
-## 3️⃣ Repartition-Based Skew Mitigation Attempt
+## 3️⃣  Validation - Remove the Hot Key
+
+### Objective
+
+As an additional check, we removed the most frequent `pickup_zone` and re-ran the same aggregation to see whether this key was responsible for any measurable skew effects (runtime increase, straggler tasks, spill, etc.).
+
+If severe skew were present, removing the hot key would typically reduce runtime and/or reduce task imbalance.
+
+---
+
+### Method
+
+We filtered out the most frequent zone (`hot_zone`) and recomputed the aggregation:
+
+```python
+df_no_hot = df_scn.filter(col("pickup_zone") != hot_zone)
+
+no_hot_agg = df_no_hot.groupBy("pickup_zone").count()
+no_hot_agg.orderBy(desc("count")).show(10, truncate=False)
+```
+
+### Spark UI - Job without Hot Key
+![No hot key job](images/scenario_whk_job.png)
+
+### Spark UI - Stage without Hot Key
+![No hot key job](images/scenario_whk_stage.png)
+
+### Interpretation
+
+Baseline and no-hot-key executions show nearly identical runtime, shuffle volume, and task distribution.
+
+Since removing the most frequent key does not materially change execution behavior, we conclude that skew impact is negligible in this dataset.
+
+Therefore, repartitioning or other skew mitigation strategies would introduce unnecessary overhead.
+
+
+## 4️⃣ Repartition-Based Skew Mitigation Attempt
 
 We tested explicit repartitioning by key before aggregation:
 
@@ -291,19 +328,19 @@ before performing the aggregation.
 
 ### Spark UI — Repartition Job
 
-![Repartition Job](images/scenario_ot_job.png)
+![Repartition Job](images/scenario_repartition_job.png)
 
 ### Spark UI — Repartition Stage
 
-![Repartition Stage](images/scenario_ot_stage.png)
+![Repartition Stage](images/scenario_repartition_stage.png)
 
-### Observed Metrics (Job 42 / Stage 56)
+### Observed Metrics (Job 36 / Stage 50)
 
 - Runtime: **0.7 s**
-- Input: **6.1 MiB**
-- Shuffle Write: **59.8 KiB**
+- Input: **5.7 MiB**
+- Shuffle Write: **3.0 MiB**
 - 16 tasks executed
-- Median task duration: **0.1 s**
+- Median task duration: **72 ms**
 - Max task duration: **0.6 s**
 - No spill
 
@@ -311,8 +348,8 @@ before performing the aggregation.
 
 Repartitioning introduced an additional shuffle phase without improving task balance.
 
-- Runtime slightly increased (0.6 s → 0.7 s)
-- Shuffle volume remained similar
+- Runtime slightly increased (0.4 s → 0.7 s)
+- Shuffle volume increased significantly (60 KiB → 3.0 MiB)
 - Task duration distribution remained balanced
 - No spill occurred in either case
 
