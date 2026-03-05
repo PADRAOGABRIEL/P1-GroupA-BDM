@@ -1,6 +1,6 @@
 # 🚕 Incremental ETL Pipeline – NYC Taxi Trips
 
-## ➡️ **Environment setup:** [SETUP.md](SETUP.md).
+## ➡️ **Environment setup:** [SETUP.md](SETUP.md)
 
 ## Overview
 
@@ -22,7 +22,7 @@ The system guarantees correctness across multiple executions and processes only 
 
 # 1️⃣ Correctness
 
-## Row Counts (New Batch)
+## Row Counts
 
 | Stage | Rows |
 |-------|------|
@@ -230,6 +230,21 @@ We computed the distribution of `pickup_zone` and identified:
 
 Although this is the most frequent key, its dominance is relatively low.
 Severe skew typically occurs when one key dominates a partition such that it significantly increases shuffle partition size relative to others, often representing a disproportionately large percentage of total records.
+
+| pickup_zone                     | count  | percentage |
+|---------------------------------|--------|------------|
+| Upper East Side South           | 286,719| 5.23%      |
+| Midtown Center                  | 283,351| 5.16%      |
+| Upper East Side North           | 263,608| 4.80%      |
+| JFK Airport                     | 250,019| 4.56%      |
+| Penn Station/Madison Sq West    | 208,572| 3.80%      |
+| Midtown East                    | 204,407| 3.73%      |
+| Times Sq/Theatre District       | 202,414| 3.69%      |
+| Lincoln Square East             | 184,968| 3.37%      |
+| LaGuardia Airport               | 166,738| 3.04%      |
+| Midtown North                   | 165,699| 3.02%      |
+
+The most frequent pickup location is Upper East Side South, with 286,719 trips, representing 5.23% of the entire dataset. The next most frequent zones are Midtown Center and Upper East Side North, both representing slightly above 5% and 4.8% of all trips respectively.
 
 ---
 
