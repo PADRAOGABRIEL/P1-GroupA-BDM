@@ -1,0 +1,14 @@
+# Data files
+data/inbox/*.parquet
+data/outbox/
+data/lookup/*.parquet
+
+# Jupyter checkpoints
+**/.ipynb_checkpoints/
+```
+
+**To preserve empty folders**, create a `.gitkeep` in each one:
+```
+data/inbox/.gitkeep
+data/outbox/.gitkeep
+data/lookup/.gitkeep
