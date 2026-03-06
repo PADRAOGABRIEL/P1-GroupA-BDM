@@ -1,6 +1,6 @@
 # Data files
 data/inbox/*.parquet
-data/outbox/
+data/outbox/*.parquet
 data/lookup/*.parquet
 
 # Jupyter checkpoints
