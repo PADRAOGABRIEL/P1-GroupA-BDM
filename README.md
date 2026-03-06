@@ -27,9 +27,9 @@ The system guarantees correctness across multiple executions and processes only 
 | Stage | Rows |
 |-------|------|
 | Input | 7,052,769 |
-| After cleaning | 5,579,927 |
-| After deduplication | 5,486,133 |
-| Final output written | 5,486,133 |
+| After cleaning | 5,473,927 |
+| After deduplication | 5,473,552 |
+| Final output written | 5,473,552 |
 
 ### Observations
 
@@ -47,8 +47,12 @@ Rows were removed when:
 - `passenger_count <= 0`  
 - `trip_distance <= 0`  
 - `tpep_dropoff_datetime <= tpep_pickup_datetime`  
+- `fare_amount < 0`  
+- `total_amount < 0`  
+- `tip_amount < 0`  
+- `tolls_amount < 0`  
 
-These constraints ensure logical trip consistency and eliminate corrupted operational records.
+These constraints ensure logical trip consistency and eliminate corrupted operational records. Financial fields with negative values indicate systematic data entry errors or reversed charge records rather than legitimate corrections.
 
 ---
 
@@ -84,6 +88,50 @@ These constraints ensure logical trip consistency and eliminate corrupted operat
 
 **Problem:** `passenger_count = 0`.  
 **Rule applied:** removed because `passenger_count <= 0`.
+
+---
+
+### Example 4 — Negative Fare Amount
+
+| passenger_count | trip_distance | tpep_pickup_datetime   | tpep_dropoff_datetime  | fare_amount |
+|---:|---:|---|---|---:|
+| 1 | 0.71 | 2025-01-01 00:01:41 | 2025-01-01 00:07:14 | -7.2 |
+
+**Problem:** `fare_amount` is negative, impossible for a legitimate trip.  
+**Rule applied:** removed because `fare_amount < 0` .
+
+---
+
+### Example 5 — Negative Tolls Amount
+
+| passenger_count | trip_distance | tpep_pickup_datetime   | tpep_dropoff_datetime  | tolls_amount |
+|---:|---:|---|---|---:|
+| 4 | 24.7 | 2025-01-01 00:49:36 | 2025-01-01 02:11:46 | -6.94 |
+
+**Problem:** `tolls_amount` is negative., impossible for a valid trip. 
+**Rule applied:** removed because `tolls_amount < 0`.
+
+---
+
+### Example 6 — Negative Tip Amount
+
+| passenger_count | trip_distance | tpep_pickup_datetime   | tpep_dropoff_datetime  | tip_amount |
+|---:|---:|---|---|---:|
+| 1 | 2.59 | 2025-01-01 00:54:33 | 2025-01-01 01:23:24 | -3.0 |
+
+**Problem:** `tip_amount` is negative, a tip cannot be a negative value.  
+**Rule applied:** removed because `tip_amount < 0`.
+
+---
+
+### Example 7 — Negative Total Amount
+
+| passenger_count | trip_distance | tpep_pickup_datetime   | tpep_dropoff_datetime  | total_amount |
+|---:|---:|---|---|---:|
+| 1 | 0.71 | 2025-01-01 00:01:41 | 2025-01-01 00:07:14 | -8.54 |
+
+**Problem:** `total_amount` is negative,the total charge for a trip cannot be negative.  
+**Rule applied:** removed because `total_amount < 0`.
 
 ---
 
@@ -233,18 +281,18 @@ Severe skew typically occurs when one key dominates a partition such that it sig
 
 | pickup_zone                     | count  | percentage |
 |---------------------------------|--------|------------|
-| Upper East Side South           | 286,719| 5.23%      |
-| Midtown Center                  | 283,351| 5.16%      |
-| Upper East Side North           | 263,608| 4.80%      |
-| JFK Airport                     | 250,019| 4.56%      |
-| Penn Station/Madison Sq West    | 208,572| 3.80%      |
-| Midtown East                    | 204,407| 3.73%      |
-| Times Sq/Theatre District       | 202,414| 3.69%      |
-| Lincoln Square East             | 184,968| 3.37%      |
-| LaGuardia Airport               | 166,738| 3.04%      |
-| Midtown North                   | 165,699| 3.02%      |
+| Upper East Side South           | 286,248| 5.23%      |
+| Midtown Center                  | 282,756| 5.17%      |
+| Upper East Side North           | 263,293| 4.81%      |
+| JFK Airport                     | 247,971| 4.53%      |
+| Penn Station/Madison Sq West    | 208,033| 3.80%      |
+| Midtown East                    | 204,011| 3.73%      |
+| Times Sq/Theatre District       | 201,809| 3.69%      |
+| Lincoln Square East             | 184,712| 3.37%      |
+| LaGuardia Airport               | 166,440| 3.04%      |
+| Midtown North                   | 165,328| 3.02%      |
 
-The most frequent pickup location is Upper East Side South, with 286,719 trips, representing 5.23% of the entire dataset. The next most frequent zones are Midtown Center and Upper East Side North, both representing slightly above 5% and 4.8% of all trips respectively.
+The most frequent pickup location is Upper East Side South, with 286,248 trips, representing 5.23% of the entire dataset. The next most frequent zones are Midtown Center and Upper East Side North, both representing slightly above 5% and 4.8% of all trips respectively.
 
 ---
 
