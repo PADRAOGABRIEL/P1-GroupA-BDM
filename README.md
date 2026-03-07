@@ -455,3 +455,15 @@ This project demonstrates:
 - Real shuffle and spill investigation  
 - Empirical skew analysis with measured conclusions  
 - Application of distributed data engineering best practices  
+
+# AI Assistance
+
+Parts of this project were developed with the assistance of ChatGPT for tasks such as:
+- clarifying Spark and Data Engineering concepts
+- improving code & documentation
+- refining explanations in the README
+
+ChatGPT was used as a support tool, while all design decisions, implementation, and validation of the results were performed by the author.
+
+ChatGPT: https://chat.openai.com/
+Chat: https://chatgpt.com/share/69ac63e7-0144-8012-9555-f0009e775a37
