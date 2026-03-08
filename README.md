@@ -33,8 +33,8 @@ The system guarantees correctness across multiple executions and processes only 
 
 ### Observations
 
-- ~1.47M rows were removed due to invalid or inconsistent data.
-- ~93K duplicate rows were removed.
+- ~1.58M rows were removed due to invalid or inconsistent data.
+- Duplicate rows were removed.
 - The final output matches the post-deduplication count, confirming correctness and idempotency.
 
 ---
